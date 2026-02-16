@@ -1,0 +1,14 @@
+{
+    "fiscal_year": 2024,
+    "source": "Consolidated Statements of Financial Condition",
+    "assets": {
+        "loans_hfi_amortized_cost": 24752940,
+        "real_estate_current": 14307394,
+        "delinquent_total": 520959,
+        "taxi_medallions": 37230
+    },
+    "allowance_for_credit_losses": {
+        "real_estate": 49925,
+        "total": 650150
+    }
+}

@@ -1,53 +1,52 @@
-import pandas as pd
-import numpy as np
+import polars as pl
 
-class MBSEngine:
-    """Core MBS Cash Flow Engine with WAL & Discounted MSR"""
+# Industry Constants
+MONTHS_IN_YEAR = 12
+BASIS_POINTS_DIVISOR = 1200  # Converts Annual % to Monthly Decimal
+STANDARD_TERM_MONTHS = 360   # Standard 30-year fixed
 
-    @staticmethod
-    def cpr_to_smm(cpr):
-        return 1 - (1 - (cpr / 100))**(1/12)
+def calculate_mbs_cashflows(df: pl.DataFrame) -> pl.DataFrame:
+    """
+    Performs vectorized mortgage amortization to isolate Scheduled vs. 
+    Unscheduled (Prepayment) principal from Fannie Mae performance data.
+    """
+    
+    # 1. Establish Lagged UPB (Beginning of Period Balance)
+    # We sort by loan_id and period to ensure the shift aligns correctly
+    df = df.sort(["loan_id", "period"])
+    
+    df = df.with_columns([
+        pl.col("upb").shift(1).over("loan_id").alias("beg_upb")
+    ])
 
-    @staticmethod
-    def _monthly_payment(balance, rate, term):
-        return balance * (rate * (1 + rate)**term) / ((1 + rate)**term - 1)
+    # 2. Calculate Interest and Total Principal Waterfall
+    df = df.with_columns([
+        (pl.col("beg_upb") * (pl.col("note_rate") / BASIS_POINTS_DIVISOR)).alias("int_cf"),
+        (pl.col("beg_upb") - pl.col("upb")).alias("total_prin_cf")
+    ])
 
-    def generate_cash_flows(self, upb, note_rate, servicing_fee_bps, cpr_scenario, msr_discount=0.08):
-        monthly_rate = (note_rate / 100) / 12
-        monthly_servicing = (servicing_fee_bps / 10000) / 12
-        smm = self.cpr_to_smm(cpr_scenario)
+    # 3. Calculate Scheduled Monthly Payment (P&I)
+    # Formula: P = L * [c(1+c)^n] / [(1+c)^n - 1]
+    # where n is remaining terms (Original Term - Current Age)
+    df = df.with_columns([
+        (pl.col("note_rate") / BASIS_POINTS_DIVISOR).alias("monthly_rate"),
+        (STANDARD_TERM_MONTHS - pl.col("loan_age")).alias("remaining_months")
+    ])
 
-        results = []
-        beg_bal = upb
-        msr_pv = 0
+    df = df.with_columns([
+        (
+            pl.col("beg_upb") * (pl.col("monthly_rate") * (1 + pl.col("monthly_rate"))**pl.col("remaining_months")) / 
+            ((1 + pl.col("monthly_rate"))**pl.col("remaining_months") - 1)
+        ).alias("scheduled_pi")
+    ])
 
-        for month in range(1, 361):
-            if beg_bal <= 0: break
-            remaining_term = 361 - month
-            total_pmt = self._monthly_payment(beg_bal, monthly_rate, remaining_term)
-            interest_pmt = beg_bal * monthly_rate
-            sched_prin = total_pmt - interest_pmt
-            prepay = (beg_bal - sched_prin) * smm
-            servicing_income = beg_bal * monthly_servicing
-            total_prin = min(beg_bal, sched_prin + prepay)
-            end_bal = beg_bal - total_prin
-            msr_pv += servicing_income / ((1 + msr_discount/12)**month)
-            results.append([month, beg_bal, sched_prin, prepay, servicing_income, end_bal])
-            beg_bal = end_bal
+    # 4. Isolate Prepayments (Voluntary Paydowns)
+    # Sched Prin = Total Scheduled Payment - Interest Part
+    # Prepay = Actual Principal Received - Scheduled Principal
+    df = df.with_columns([
+        (pl.col("scheduled_pi") - pl.col("int_cf")).alias("sched_prin_cf")
+    ]).with_columns([
+        (pl.col("total_prin_cf") - pl.col("sched_prin_cf")).alias("prepay_cf")
+    ])
 
-        df = pd.DataFrame(results, columns=['Month','Beg_Bal','Sched_Prin','Prepay','MSR_Fee','End_Bal'])
-        total_principal = df['Sched_Prin'] + df['Prepay']
-        wal = (df['Month'] * total_principal).sum() / upb / 12
-
-        summary = {
-            "WAL_Years": round(wal, 2),
-            "Total_Principal": round(total_principal.sum(), 2),
-            "Total_Prepay": round(df['Prepay'].sum(), 2),
-            "MSR_PV": round(msr_pv, 2),
-            "Final_Balance": round(beg_bal, 2)
-        }
-
-        return df, summary
-
-    def calculate_green_impact(self, total_upb, kbtu_factor):
-        return (total_upb / 1_000_000) * kbtu_factor
+    #

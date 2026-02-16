@@ -1,9 +1,6 @@
 # Agency-MBS-Impact-Analytics
 Quantitative engine for benchmarking Agency MBS portfolios against Fannie Mae ESG (Green/Social) metrics.
 
-# Agency-MBS-Impact-Analytics
-Quantitative engine for benchmarking Agency MBS portfolios against Fannie Mae ESG (Green/Social) metrics.
-
 # Agency MBS Impact Analytics
 Analyzing Mortgage-Backed Securities through the lens of ESG and Velocity.
 

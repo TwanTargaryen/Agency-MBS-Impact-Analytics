@@ -1,24 +1,22 @@
-# Agency MBS Impact Analytics
-![Python](https://img.shields.io/badge/python-3.10+-blue.svg)
-![ESG](https://img.shields.io/badge/ESG-Metrics-green)
+# PenFed 2024 Strategic Securitization & Audit Framework
 
-Quantitative engine for benchmarking Agency MBS portfolios against Fannie Mae ESG (Green/Social) metrics and modeling cash flow sensitivity.
+This repository provides an automated pipeline for auditing and securitizing mortgage assets, specifically calibrated to the **Pentagon Federal Credit Union 2024 Annual Report**.
 
-## 🚀 The Mission
-To reconcile internal portfolio performance against GSE (Fannie Mae) benchmarks for Social and Green impact, while quantifying the economic value of MSR (Mortgage Servicing Rights) under varying prepayment speeds.
+## 🏗️ Architecture
+* **`engine.py`**: Deterministic cash-flow engine (Amortization, SMM, and MSR fee stripping).
+* **`cpr_ensemble.py`**: A 9-model ML ensemble for prepayment (CPR) forecasting.
+* **`pipeline_securitization.py`**: Business logic for Fannie Mae delivery, including "Eligibility Guardrails" (Note 3 & 5 compliance).
+* **`stress_test.py`**: Scenario analysis for Interest Rate (IR) shocks and Credit Stress.
 
-## 📊 Core Functionality
-* **Cash Flow Waterfall:** 360-month projection of Principal, Interest, and Prepayments using CPR/SMM models.
-* **Prepayment Modeling:** Implements the PSA Standard Prepayment Model to account for seasoning ramps.
-* **Green Bond Attribution:** Maps CUSIPs to Energy Savings (kBTU) and Emissions (MTCO2e) based on 2024 Fannie Mae disclosures.
-* **Sensitivity Analysis:** Stress tests MSR value against interest rate shocks (Contraction vs. Extension Risk).
+## 🚀 Quick Start
+1. **Install Dependencies**: `pip install -r requirements.txt`
+2. **Run the Dashboard**: `python scripts/main_dashboard.py`
+3. **Run Validation Tests**: `pytest tests/`
 
-## 📂 Project Structure
-* `scripts/mbs_engine.py`: The core mathematical class for cash flow generation.
-* `scripts/stress_test.py`: Scenario runner for interest rate and prepayment sensitivity.
-* `data_samples/`: Synthetic portfolio data (based on CUSIP MB0291) to demonstrate model logic.
-* `visuals/`: Output directory for CPR curves and MSR valuation charts.
+## 🛡️ Audit Governance Features
+* **Auto-Purge**: Automatically identifies and removes ineligible assets (e.g., Taxi Medallions) from securitization pools.
+* **Credit Enhancement Validation**: Verifies that the Allowance for Credit Losses (ACL) meets secondary market thresholds.
+* **MSR Mark-to-Market**: Validates the reported $8.5M in Mortgage Banking Activities against ML-projected cash flows.
 
-## 🛠️ Tech Stack
-* **Python:** Pandas, NumPy (Vectorized cash flow math)
-* **Visuals:** Matplotlib (Prepayment S-curves)
+---
+*Developed for Strategic Audit Analysis - 2026*

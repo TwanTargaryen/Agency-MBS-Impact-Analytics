@@ -1,23 +1,23 @@
-from engine import MBSEngine
-from portfolio_strategy import PortfolioStrategy
+from pipeline_securitization import SecuritizationPipeline
+import json
 
-# 1. Input the PenFed Balance Sheet Data
-penfed_data = {
-    'Category': ['Loans', 'Loans', 'Investments', 'Investments'],
-    'Fiscal Year': [2023, 2024, 2023, 2024],
-    'Balance': [28701635, 24752940, 3116861, 3145073]
-}
+def run_demo():
+    # Load the "Audit Reality" from our data samples
+    with open('data_samples/penfed_2024_snapshot.json') as f:
+        data = json.load(f)
 
-# 2. Run Strategy
-strategy = PortfolioStrategy(penfed_data)
-current_loan_book = strategy.get_analysis()
+    print("🚀 INITIALIZING PENFED AUDIT TERMINAL...")
+    
+    # Run the Securitization Pipeline
+    pipeline = SecuritizationPipeline(data)
+    results = pipeline.run_fannie_delivery()
 
-# 3. Run Quantitative Scenarios
-engine = MBSEngine()
-scenarios = {'Slow': 6, 'Base': 12, 'Fast': 25}
+    print(f"\n--- 2024 FANNIE MAE DELIVERY SUMMARY ---")
+    print(f"Eligible Pool UPB:  ${results['Pool_Size']:,.2f}")
+    print(f"ML Prepay Forecast: {results['ML_CPR_Forecast']}")
+    print(f"Retained MSR Value: ${results['Retained_MSR_Value']:,.2f}")
+    print(f"Compliance Status:  {results['Status']}")
+    print(f"Confidence Level:   {results['Model_Confidence']}")
 
-print("\nSCENARIO SENSITIVITY (Macro Portfolio Level):")
-for name, cpr in scenarios.items():
-    df = engine.generate_waterfall(current_loan_book, 6.5, cpr)
-    total_msr = df['MSR_Fee'].sum()
-    print(f"{name} ({cpr}% CPR): MSR Asset Value = ${total_msr:,.2f}")
+if __name__ == "__main__":
+    run_demo()

@@ -11,43 +11,45 @@ def calculate_mbs_cashflows(df: pl.DataFrame) -> pl.DataFrame:
     Unscheduled (Prepayment) principal from Fannie Mae performance data.
     """
     
-    # 1. Establish Lagged UPB (Beginning of Period Balance)
-    # Sort ensure chronological order per loan for the 'shift' to work
+    # 1. Sort to ensure chronological order per loan
     df = df.sort(["loan_id", "period"])
     
+    # 2. Establish Beginning UPB
+    # coalesce ensures that for the first month (or single-row files), 
+    # beg_upb is not null by using the current UPB as the starting point.
     df = df.with_columns([
-        pl.col("upb").shift(1).over("loan_id").alias("beg_upb")
+        pl.col("upb").shift(1).over("loan_id").alias("prev_upb")
+    ]).with_columns([
+        pl.coalesce(pl.col("prev_upb"), pl.col("upb")).alias("beg_upb")
     ])
 
-    # 2. Calculate Interest and Total Principal Waterfall
+    # 3. Calculate Interest and Total Principal Waterfall
     df = df.with_columns([
         (pl.col("beg_upb") * (pl.col("note_rate") / BASIS_POINTS_DIVISOR)).alias("int_cf"),
         (pl.col("beg_upb") - pl.col("upb")).alias("total_prin_cf")
     ])
 
-    # 3. Calculate Scheduled Monthly Payment (P&I)
-    # Standard Amortization Formula: P = L * [i(1+i)^n] / [(1+i)^n - 1]
+    # 4. Calculate Scheduled Monthly Payment (P&I)
+    # Formula: P = L * [i(1+i)^n] / [(1+i)^n - 1]
     df = df.with_columns([
-        (pl.col("note_rate") / BASIS_POINTS_DIVISOR).alias("monthly_rate"),
-        (STANDARD_TERM_MONTHS - pl.col("loan_age")).alias("remaining_months")
-    ])
-
-    # We use a small epsilon to avoid division by zero on matured loans
-    df = df.with_columns([
+        (pl.col("note_rate") / BASIS_POINTS_DIVISOR).alias("i"),
+        (STANDARD_TERM_MONTHS - pl.col("loan_age")).alias("n")
+    ]).with_columns([
         (
-            pl.col("beg_upb") * (pl.col("monthly_rate") * (1 + pl.col("monthly_rate"))**pl.col("remaining_months")) / 
-            ((1 + pl.col("monthly_rate"))**pl.col("remaining_months") - 1 + 1e-10)
+            pl.col("beg_upb") * (pl.col("i") * (1 + pl.col("i"))**pl.col("n")) / 
+            ((1 + pl.col("i"))**pl.col("n") - 1 + 1e-10)
         ).alias("scheduled_pi")
     ])
 
-    # 4. Isolate Prepayments (Voluntary Paydowns)
+    # 5. Isolate Prepayments (Voluntary Paydowns)
+    # Scheduled Principal = Total P&I Payment - Interest portion
     df = df.with_columns([
         (pl.col("scheduled_pi") - pl.col("int_cf")).alias("sched_prin_cf")
     ]).with_columns([
         (pl.col("total_prin_cf") - pl.col("sched_prin_cf")).alias("prepay_cf")
     ])
 
-    # 5. Calculate Prepayment Speeds (SMM & CPR)
+    # 6. Calculate Prepayment Speeds (SMM & CPR)
     # SMM = Prepay / (Beginning UPB - Scheduled Principal)
     df = df.with_columns([
         (pl.col("prepay_cf") / (pl.col("beg_upb") - pl.col("sched_prin_cf") + 1e-10))
@@ -58,18 +60,27 @@ def calculate_mbs_cashflows(df: pl.DataFrame) -> pl.DataFrame:
         (1 - (1 - pl.col("smm"))**MONTHS_IN_YEAR).alias("cpr")
     ])
 
-    # 6. CRITICAL: Return the processed dataframe
-    return df.drop_nulls(subset=["beg_upb"])
+    return df.filter(pl.col("beg_upb") > 0)
 
 def get_pool_kpis(df: pl.DataFrame):
-    """Summarizes the loan-level data into Portfolio-level metrics."""
+    """
+    Summarizes the loan-level data into Portfolio-level metrics.
+    Returns zeroed metrics if the dataframe is empty to prevent dashboard crashes.
+    """
     if df.is_empty():
-        return {"Error": "Dataframe is empty"}
+        return {
+            "WAC": 0.0, "Avg_CPR": 0.0, "WAL": 0.0, 
+            "Total_Int_Income": 0.0, "Total_Prin_Recovered": 0.0, "Prepay_Ratio": 0.0
+        }
         
     metrics = {
         "WAC": df["note_rate"].mean(),
         "Avg_CPR": df["cpr"].mean(),
-        "Total_Cash_Flow": df["int_cf"].sum() + df["total_prin_cf"].sum(),
-        "Prepay_Ratio": df["prepay_cf"].sum() / (df["total_prin_cf"].sum() + 1e-10)
+        "Total_Int_Income": df["int_cf"].sum(),
+        "Total_Prin_Recovered": df["total_prin_cf"].sum(),
     }
-    return metrics
+    
+    # Calculate Weighted Average Life (WAL)
+    total_prin = metrics["Total_Prin_Recovered"]
+    metrics["WAL"] = (df["total_prin_cf"] * (df["loan_age"] / 12)).sum() / (total_prin + 1e-10)
+    metrics["Prepay_Ratio"] = df["prepay_cf"].sum() / (total_prin +
